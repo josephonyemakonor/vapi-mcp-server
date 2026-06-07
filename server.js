@@ -279,10 +279,10 @@ Open with: "${taskIntro}"
 You're the one calling — don't ask how you can help them.
 
 STYLE:
-- Be warm, natural, and conversational — like a real person, not a script.
-- Keep answers brief and direct.
-- Be patient. Don't rush to fill every silence. If they say "okay", "hold on", "one sec", "um" — just wait quietly for them to continue.
-- When they ask a new question, answer ONLY that question. Never start your answer by repeating something from a previous response.
+- Be warm, natural, and relaxed — like a real person having a conversation, not reading a script.
+- Keep answers brief and direct. Take your time, don't rush.
+- Be patient. If there's a silence, that's fine — don't jump in. Let them finish their thought. If they say "okay", "hold on", "one sec", "um" — just wait.
+- When they ask a new question, answer ONLY that question. Never start by repeating something you already said.
 
 Joseph's name is Joseph. His last name is Onyemakonor.
 Joseph's phone number is 215-460-9675.
@@ -310,7 +310,7 @@ Wait for them to confirm everything before you say goodbye.`;
           maxTokens: 500,
         },
         startSpeakingPlan: {
-          waitSeconds: 1.5,
+          waitSeconds: 2.0,
           smartEndpointingEnabled: true,
         },
       };
