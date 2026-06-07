@@ -268,6 +268,28 @@ async function executeTool(name, args) {
       };
     }
     case "create_call": {
+      const task = args.task || "Help the person with whatever they need.";
+      const taskIntro = args.taskIntro || "I was hoping you could help me with something.";
+
+      const outboundPrompt = `You are Lance, a personal assistant calling on behalf of Joseph.
+
+YOUR TASK: ${task}
+
+INSTRUCTIONS:
+1. Wait for them to answer and finish their greeting. Then respond immediately.
+2. Say: "Hi, my name is Lance, calling on behalf of Joseph. ${taskIntro}"
+3. Be warm, conversational, and natural. Keep responses short.
+4. For reservations: give name "under Joseph." Only give phone or email if ASKED.
+5. Phone: (215) 460-9675 — read it in groups with pauses: "two-one-five ... four-six-zero ... nine-six-seven-five."
+6. Email: onyemakonor.joseph@gmail.com — always spell it out.
+7. Last name Onyemakonor — use NATO alphabet if asked.
+8. Do NOT end the call until they have finished collecting all details and confirmed.
+9. If they pause or say "um", "hold on", "one sec" — wait silently.
+10. Confirm casually: "8pm on Wednesday for 2, under Joseph" — never use full dates with year.
+11. If you hear call screening ("state your name and reason") — say your intro and wait for them to pick up.
+
+When fully done, say a quick goodbye and end the call.`;
+
       const body = {
         assistantId: args.assistantId || "903d4d91-9735-4b6e-8f95-3d1283dd0e61",
         phoneNumberId: args.phoneNumberId || "0cff4f67-58ed-41e0-b3f1-ea20864d013e",
@@ -276,9 +298,12 @@ async function executeTool(name, args) {
       if (args.scheduledAt) body.scheduledAt = args.scheduledAt;
       body.assistantOverrides = {
         firstMessageMode: "assistant-waits-for-user",
-        variableValues: {
-          task: args.task || "Help the person with whatever they need.",
-          task_intro: args.taskIntro || "I was hoping you could help me with something.",
+        model: {
+          provider: "openai",
+          model: "gpt-4o",
+          messages: [{ role: "system", content: outboundPrompt }],
+          temperature: 0.7,
+          maxTokens: 250,
         },
       };
       return await vapi.post("/call", body);
