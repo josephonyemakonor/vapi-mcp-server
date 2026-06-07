@@ -319,6 +319,10 @@ When fully done, say a quick goodbye and end the call.`;
           temperature: 0.7,
           maxTokens: 250,
         },
+        startSpeakingPlan: {
+          waitSeconds: 1.5,
+          smartEndpointingEnabled: true,
+        },
       };
       return await vapi.post("/call", body);
     }
