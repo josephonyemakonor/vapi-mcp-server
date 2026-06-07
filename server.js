@@ -310,7 +310,7 @@ Wait for them to confirm everything before you say goodbye.`;
           maxTokens: 500,
         },
         startSpeakingPlan: {
-          waitSeconds: 2.0,
+          waitSeconds: 1.5,
           smartEndpointingEnabled: true,
         },
       };
