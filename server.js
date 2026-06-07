@@ -195,6 +195,47 @@ const TOOLS = [
       required: ["phoneNumberId"],
     },
   },
+
+  // Cost & analytics
+  {
+    name: "get_cost_summary",
+    description:
+      "Get a summary of call costs. Shows total spent, number of calls, average cost per call, and breakdown by cost type (transcriber, LLM, voice, Vapi platform). Use to answer 'how much have I spent on calls?'",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of recent calls to analyze (default 50)" },
+      },
+    },
+  },
+
+  // Retry
+  {
+    name: "retry_failed_calls",
+    description:
+      "Check recent calls for failures (voicemail, no answer, errors) and retry them. Returns which calls were retried.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", description: "Number of recent calls to check (default 20)" },
+      },
+    },
+  },
+
+  // Call history lookup by phone number
+  {
+    name: "lookup_call_history",
+    description:
+      "Look up all past calls with a specific phone number. Useful for getting context before or during a call — shows previous transcripts, summaries, and outcomes with that person.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        phoneNumber: { type: "string", description: "Phone number to look up in E.164 format (e.g. +14155551234)" },
+        limit: { type: "number", description: "Max results (default 10)" },
+      },
+      required: ["phoneNumber"],
+    },
+  },
 ];
 
 // ── Tool execution ───────────────────────────────────────────────────────────
@@ -303,6 +344,116 @@ async function executeTool(name, args) {
       return await vapi.patch(`/phone-number/${args.phoneNumberId}`, body);
     }
 
+    // Cost & analytics
+    case "get_cost_summary": {
+      const limit = args.limit || 50;
+      const calls = await vapi.get(`/call?limit=${limit}`);
+      if (!Array.isArray(calls)) return calls;
+
+      let totalCost = 0;
+      let totalCalls = 0;
+      let totalDurationSec = 0;
+      const byType = {};
+
+      for (const call of calls) {
+        if (!call.costBreakdown) continue;
+        totalCalls++;
+        totalCost += call.costBreakdown.total || 0;
+        if (call.startedAt && call.endedAt) {
+          totalDurationSec += (new Date(call.endedAt) - new Date(call.startedAt)) / 1000;
+        }
+        for (const [key, val] of Object.entries(call.costBreakdown)) {
+          if (typeof val === "number" && key !== "total") {
+            byType[key] = (byType[key] || 0) + val;
+          }
+        }
+      }
+
+      return {
+        totalCalls,
+        totalCost: `$${totalCost.toFixed(4)}`,
+        averageCostPerCall: totalCalls ? `$${(totalCost / totalCalls).toFixed(4)}` : "$0",
+        totalDurationMinutes: Math.round(totalDurationSec / 60 * 10) / 10,
+        costBreakdown: Object.fromEntries(
+          Object.entries(byType).map(([k, v]) => [k, `$${v.toFixed(4)}`])
+        ),
+        callsAnalyzed: calls.length,
+      };
+    }
+
+    // Retry failed calls
+    case "retry_failed_calls": {
+      const limit = args.limit || 20;
+      const calls = await vapi.get(`/call?limit=${limit}`);
+      if (!Array.isArray(calls)) return calls;
+
+      const failReasons = [
+        "voicemail",
+        "customer-did-not-answer",
+        "customer-busy",
+        "call.start.error",
+        "no-answer",
+      ];
+
+      const retried = [];
+      for (const call of calls) {
+        const reason = call.endedReason || "";
+        const shouldRetry = failReasons.some((r) => reason.includes(r));
+        if (!shouldRetry) continue;
+        if (!call.assistantId || !call.customer?.number) continue;
+
+        const body = {
+          assistantId: call.assistantId,
+          phoneNumberId: call.phoneNumberId || "9d3011b9-ac34-44f8-b7f8-235581752106",
+          customer: { number: call.customer.number },
+        };
+
+        const result = await vapi.post("/call", body);
+        retried.push({
+          originalCallId: call.id,
+          originalReason: reason,
+          customerNumber: call.customer.number,
+          newCallId: result.id,
+          status: result.status || "created",
+        });
+      }
+
+      return {
+        checkedCalls: calls.length,
+        retriedCalls: retried.length,
+        retries: retried,
+      };
+    }
+
+    // Call history by phone number
+    case "lookup_call_history": {
+      const limit = args.limit || 10;
+      const allCalls = await vapi.get(`/call?limit=100`);
+      if (!Array.isArray(allCalls)) return allCalls;
+
+      const matches = allCalls
+        .filter((c) => c.customer?.number === args.phoneNumber)
+        .slice(0, limit)
+        .map((c) => ({
+          id: c.id,
+          type: c.type,
+          status: c.status,
+          endedReason: c.endedReason,
+          startedAt: c.startedAt,
+          endedAt: c.endedAt,
+          transcript: c.transcript,
+          summary: c.analysis?.summary,
+          taskCompleted: c.analysis?.successEvaluation,
+          structuredData: c.analysis?.structuredData,
+        }));
+
+      return {
+        phoneNumber: args.phoneNumber,
+        totalCalls: matches.length,
+        calls: matches,
+      };
+    }
+
     default:
       return { error: `Unknown tool: ${name}` };
   }
@@ -369,6 +520,52 @@ app.get("/mcp", authenticate, (req, res) => {
 
 app.delete("/mcp", authenticate, (req, res) => {
   res.status(204).end();
+});
+
+// ── Vapi function tool endpoint (called by Lance during inbound calls) ───────
+app.post("/api/caller-context", async (req, res) => {
+  try {
+    const callerNumber = req.body?.message?.customer?.number
+      || req.body?.message?.call?.customer?.number
+      || req.body?.call?.customer?.number;
+
+    if (!callerNumber) {
+      return res.json({ results: [{ result: "No caller number available." }] });
+    }
+
+    const allCalls = await vapi.get("/call?limit=100");
+    if (!Array.isArray(allCalls)) {
+      return res.json({ results: [{ result: "Could not fetch call history." }] });
+    }
+
+    const history = allCalls
+      .filter((c) => c.customer?.number === callerNumber && c.transcript)
+      .slice(0, 5)
+      .map((c) => ({
+        date: c.startedAt,
+        type: c.type,
+        summary: c.analysis?.summary || "No summary",
+        taskCompleted: c.analysis?.successEvaluation,
+      }));
+
+    if (history.length === 0) {
+      return res.json({
+        results: [{ result: `No previous calls found with ${callerNumber}. This is a new caller.` }],
+      });
+    }
+
+    const context = history
+      .map((h, i) => `Call ${i + 1} (${h.date}): ${h.summary}`)
+      .join("\n");
+
+    return res.json({
+      results: [{
+        result: `Found ${history.length} previous call(s) with ${callerNumber}:\n${context}`,
+      }],
+    });
+  } catch (err) {
+    return res.json({ results: [{ result: `Error looking up history: ${err.message}` }] });
+  }
 });
 
 app.get("/health", (req, res) => {
