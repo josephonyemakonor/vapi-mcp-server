@@ -274,14 +274,13 @@ async function executeTool(name, args) {
         customer: { number: args.customerNumber },
       };
       if (args.scheduledAt) body.scheduledAt = args.scheduledAt;
-      if (args.task || args.taskIntro) {
-        body.assistantOverrides = {
-          variableValues: {
-            task: args.task || "Help the person with whatever they need.",
-            task_intro: args.taskIntro || "I was hoping you could help me with something.",
-          },
-        };
-      }
+      body.assistantOverrides = {
+        firstMessageMode: "assistant-waits-for-user",
+        variableValues: {
+          task: args.task || "Help the person with whatever they need.",
+          task_intro: args.taskIntro || "I was hoping you could help me with something.",
+        },
+      };
       return await vapi.post("/call", body);
     }
 
