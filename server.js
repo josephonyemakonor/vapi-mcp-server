@@ -86,16 +86,18 @@ const TOOLS = [
   {
     name: "create_call",
     description:
-      "Create an outbound phone call. The assistant will call the customer number and conduct the conversation.",
+      "Create an outbound phone call with a specific task. Examples: 'Call Samson and ask what the plan is tonight', 'Call Olive Garden and book a table for 4 at 7pm Saturday', 'Call Mom and wish her happy birthday'. The task field tells the assistant exactly what to do on the call.",
     inputSchema: {
       type: "object",
       properties: {
-        assistantId: { type: "string", description: "Assistant ID to use for the call" },
-        phoneNumberId: { type: "string", description: "Phone number ID to call from" },
+        assistantId: { type: "string", description: "Assistant ID to use for the call (default: 903d4d91-9735-4b6e-8f95-3d1283dd0e61)" },
+        phoneNumberId: { type: "string", description: "Phone number ID to call from (default: 9d3011b9-ac34-44f8-b7f8-235581752106)" },
         customerNumber: { type: "string", description: "Customer phone number in E.164 format (e.g. +14155551234)" },
+        task: { type: "string", description: "What the assistant should do on this call. Be specific: e.g. 'Book a table for 4 at 7pm this Saturday under the name Joseph', 'Ask Samson what the plan is for tonight', 'Wish Maria a happy birthday and tell her Joseph is thinking of her'" },
+        taskIntro: { type: "string", description: "How the assistant should introduce the call purpose after saying hello. e.g. 'I was hoping to make a reservation', 'Joseph wanted me to check in with you', 'Joseph asked me to give you a quick call'" },
         scheduledAt: { type: "string", description: "ISO datetime to schedule the call (e.g. 2026-03-25T22:00:00Z). Omit to call immediately." },
       },
-      required: ["assistantId", "phoneNumberId", "customerNumber"],
+      required: ["customerNumber", "task"],
     },
   },
 
@@ -226,11 +228,19 @@ async function executeTool(name, args) {
     }
     case "create_call": {
       const body = {
-        assistantId: args.assistantId,
-        phoneNumberId: args.phoneNumberId,
+        assistantId: args.assistantId || "903d4d91-9735-4b6e-8f95-3d1283dd0e61",
+        phoneNumberId: args.phoneNumberId || "9d3011b9-ac34-44f8-b7f8-235581752106",
         customer: { number: args.customerNumber },
       };
       if (args.scheduledAt) body.scheduledAt = args.scheduledAt;
+      if (args.task || args.taskIntro) {
+        body.assistantOverrides = {
+          variableValues: {
+            task: args.task || "Help the person with whatever they need.",
+            task_intro: args.taskIntro || "I was hoping you could help me with something.",
+          },
+        };
+      }
       return await vapi.post("/call", body);
     }
 
