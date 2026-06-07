@@ -304,7 +304,7 @@ Wait for them to confirm everything before you say goodbye.`;
           provider: "openai",
           model: "gpt-4o",
           messages: [{ role: "system", content: outboundPrompt }],
-          temperature: 0.7,
+          temperature: 0.5,
           maxTokens: 500,
         },
         startSpeakingPlan: {
