@@ -43,6 +43,29 @@ const vapi = {
   del: (path) => vapiRequest("DELETE", path),
 };
 
+// ── Behavioral system prompt ─────────────────────────────────────────────────
+// This is the stable identity: HOW Savannah behaves on any call. It carries no
+// names, numbers, or call-type assumptions. Everything specific to a given call
+// (who she represents, the goal, any details) arrives as separate call context.
+const SYSTEM_PROMPT = `You are Savannah, a friendly, capable assistant handling a phone call by voice.
+
+Sound like a real, relaxed person — warm and natural, never scripted or robotic. This is a live conversation, not a reading.
+
+How you talk:
+- Say one thing at a time, keep it short, and let the other person respond.
+- Answer what's asked directly and clearly. Don't volunteer things nobody asked for, and never repeat something you already said.
+- Be patient. Silences and fillers ("um", "one sec", "hold on") are normal — wait for them to finish. Don't jump in or talk over them.
+- If they interrupt you, stop and listen.
+
+Saying things clearly:
+- Read phone numbers, confirmation codes, and emails slowly, digit by digit or piece by piece.
+- For an email, say the whole thing once, then spell it out.
+- If asked to spell a name, use the NATO phonetic alphabet (Alpha, Bravo, Charlie...).
+
+Run the call naturally: if you placed it, lead it toward its purpose; if you answered it, find out what the caller needs. When everything's handled, confirm the key details, thank them, and wrap up warmly.
+
+Everything specific to this call — who you're representing, why you're on the call, and any details you might need — comes from the context you're given below. Rely on it, and don't invent facts you weren't given.`;
+
 // ── Tool definitions ─────────────────────────────────────────────────────────
 const TOOLS = [
   // Calls
@@ -93,8 +116,11 @@ const TOOLS = [
         assistantId: { type: "string", description: "Assistant ID to use for the call (default: 903d4d91-9735-4b6e-8f95-3d1283dd0e61)" },
         phoneNumberId: { type: "string", description: "Phone number ID to call from (default: 0cff4f67-58ed-41e0-b3f1-ea20864d013e)" },
         customerNumber: { type: "string", description: "Customer phone number in E.164 format (e.g. +14155551234)" },
-        task: { type: "string", description: "What the assistant should do on this call. Be specific: e.g. 'Book a table for 4 at 7pm this Saturday under the name Joseph', 'Ask Samson what the plan is for tonight', 'Wish Maria a happy birthday and tell her Joseph is thinking of her'" },
-        taskIntro: { type: "string", description: "How the assistant should introduce the call purpose after saying hello. e.g. 'I was hoping to make a reservation', 'Joseph wanted me to check in with you', 'Joseph asked me to give you a quick call'" },
+        task: { type: "string", description: "The goal of this call — the single most important field. Be specific: e.g. 'Book a table for 4 at 7pm this Saturday under the name Joseph', 'Ask Samson what the plan is for tonight', 'Ask what time the pharmacy closes today', 'Wish Maria a happy birthday from Joseph'. The assistant gets ALL of its call-specific context from this field, so include any relevant details here." },
+        taskIntro: { type: "string", description: "Optional. A natural opening line for the assistant to start with, e.g. 'Hi, I'd like to make a reservation', 'Hey, Joseph asked me to give you a quick call'. If omitted, the assistant opens in its own words." },
+        onBehalfOf: { type: "string", description: "Optional. Who the assistant is representing on this call (default: 'Joseph Onyemakonor')." },
+        contactPhone: { type: "string", description: "Optional. A callback/contact phone number to give if asked (default: Joseph's number). Pass an empty string to provide none." },
+        contactEmail: { type: "string", description: "Optional. A contact email to give if asked (default: Joseph's email). Pass an empty string to provide none." },
         scheduledAt: { type: "string", description: "ISO datetime to schedule the call (e.g. 2026-03-25T22:00:00Z). Omit to call immediately." },
       },
       required: ["customerNumber", "task"],
@@ -269,28 +295,28 @@ async function executeTool(name, args) {
     }
     case "create_call": {
       const task = args.task || "Help the person with whatever they need.";
-      const taskIntro = args.taskIntro || "Hi, I was hoping you could help me with something.";
 
-      const outboundPrompt = `You are Savannah, Joseph's personal assistant. You're making a phone call.
+      // Who Savannah represents on this call. Defaults to Joseph, but is just
+      // context — overridable so the same bot works for any principal.
+      const onBehalfOf = args.onBehalfOf || "Joseph Onyemakonor";
+      const contactLines = [];
+      const phone = args.contactPhone || "215-460-9675";
+      const email = args.contactEmail || "onyemakonor.joseph@gmail.com";
+      if (phone) contactLines.push(`- Phone: ${phone}`);
+      if (email) contactLines.push(`- Email: ${email}`);
 
-Your task: ${task}
+      const openLine = args.taskIntro
+        ? `Open with something like: "${args.taskIntro}"`
+        : `Open by briefly saying who you are and why you're calling.`;
 
-Open with: "${taskIntro}"
-You're the one calling — don't ask how you can help them.
+      const callContext = `CONTEXT FOR THIS CALL
 
-STYLE:
-- Be warm, natural, and relaxed — like a real person having a conversation, not reading a script.
-- Keep answers brief and direct. Take your time, don't rush.
-- Be patient. If there's a silence, that's fine — don't jump in. Let them finish their thought. If they say "okay", "hold on", "one sec", "um" — just wait.
+You placed this call on behalf of ${onBehalfOf}, so lead it toward the goal — don't ask them how you can help you.
 
-Joseph's details:
-- Name: Joseph Onyemakonor
-- Phone: 215-460-9675
-- Email: onyemakonor.joseph@gmail.com
+Goal: ${task}
 
-Say numbers and emails slowly and clearly so they're easy to catch. When giving an email, say it once then spell it out. If asked to spell the last name, use the NATO phonetic alphabet.
-
-Wait for them to confirm everything before you say goodbye.`;
+${openLine}
+${contactLines.length ? `\nDetails you may need if they're asked for:\n${contactLines.join("\n")}` : ""}`;
 
       const body = {
         assistantId: args.assistantId || "903d4d91-9735-4b6e-8f95-3d1283dd0e61",
@@ -303,7 +329,10 @@ Wait for them to confirm everything before you say goodbye.`;
         model: {
           provider: "openai",
           model: "gpt-4o",
-          messages: [{ role: "system", content: outboundPrompt }],
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: callContext },
+          ],
           temperature: 0.5,
           maxTokens: 500,
         },
