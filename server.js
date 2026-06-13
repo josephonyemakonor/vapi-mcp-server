@@ -47,13 +47,13 @@ const vapi = {
 // This is the stable identity: HOW Savannah behaves on any call. It carries no
 // names, numbers, or call-type assumptions. Everything specific to a given call
 // (who she represents, the goal, any details) arrives as separate call context.
-const SYSTEM_PROMPT = `You are Savannah, a friendly, capable assistant handling a phone call by voice.
-
-Sound like a real, relaxed person — warm and natural, never scripted or robotic. This is a live conversation, not a reading.
+const SYSTEM_PROMPT = `You are Savannah. You're a real, warm, easy-going person talking on the phone — not a script, not an announcement. Just a normal person having a conversation.
 
 How you talk:
-- Say one thing at a time, keep it short, and let the other person respond.
-- Answer what's asked directly and clearly. Don't volunteer things nobody asked for, and never repeat something you already said.
+- Always speak in the first person. Say "I". Never refer to yourself as "Savannah" or as "the assistant" — that third-person stuff sounds broken.
+- Don't lead with your name or job title, and don't announce that you're an assistant. Just talk like a normal person would. Only say who you are if someone actually asks.
+- Say one thing at a time, keep it short and casual, and let the other person respond.
+- Answer what's asked directly. Don't volunteer things nobody asked for, and never repeat something you already said.
 - Be patient. Silences and fillers ("um", "one sec", "hold on") are normal — wait for them to finish. Don't jump in or talk over them.
 - If they interrupt you, stop and listen.
 
@@ -306,12 +306,12 @@ async function executeTool(name, args) {
       if (email) contactLines.push(`- Email: ${email}`);
 
       const openLine = args.taskIntro
-        ? `Open with something like: "${args.taskIntro}"`
-        : `Open by briefly saying who you are and why you're calling.`;
+        ? `When they pick up, open with something like: "${args.taskIntro}"`
+        : `When they pick up, just get to the point naturally — say why you're calling, like a normal person would. No need to give your name or explain who you are unless they ask.`;
 
       const callContext = `CONTEXT FOR THIS CALL
 
-You placed this call on behalf of ${onBehalfOf}, so lead it toward the goal — don't ask them how you can help you.
+You're the one who placed this call (you're handling it for ${onBehalfOf}), so you lead — don't ask them how you can help.
 
 Goal: ${task}
 
@@ -325,7 +325,10 @@ ${contactLines.length ? `\nDetails you may need if they're asked for:\n${contact
       };
       if (args.scheduledAt) body.scheduledAt = args.scheduledAt;
       body.assistantOverrides = {
+        // Wait for the callee to speak first, and DON'T speak the base
+        // assistant's inbound greeting — generate the opener from call context.
         firstMessageMode: "assistant-waits-for-user",
+        firstMessage: "",
         model: {
           provider: "openai",
           model: "gpt-4o",
@@ -333,7 +336,7 @@ ${contactLines.length ? `\nDetails you may need if they're asked for:\n${contact
             { role: "system", content: SYSTEM_PROMPT },
             { role: "system", content: callContext },
           ],
-          temperature: 0.5,
+          temperature: 0.7,
           maxTokens: 500,
         },
         startSpeakingPlan: {
